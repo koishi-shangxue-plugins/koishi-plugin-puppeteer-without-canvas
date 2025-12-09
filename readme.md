@@ -65,6 +65,7 @@
   defaultViewport: { width: 1280, height: 768, deviceScaleFactor: 2 }
 }
 ```
+
 </details>
 
 <details>
@@ -138,6 +139,7 @@
   }
 }
 ```
+
 </details>
 
 <details>
@@ -164,6 +166,7 @@ chrome.exe --remote-debugging-port=14550 --proxy-server="proxy.example.com:8080;
 - 代理设置仅影响浏览器的网络请求，不影响 WebSocket 调试连接。
 - 如果代理需要认证，可以使用 `--proxy-auth=username:password` 参数。
 - 在生产环境中，建议使用环境变量或配置文件管理代理信息，避免在命令行中暴露敏感信息。
+
 </details>
 
 <details>
@@ -179,6 +182,7 @@ ctx.puppeteer.render('<div style="color: red">Hello World</div>')
     console.log(image) // 返回 h.image 对象的字符串表示
   })
 ```
+
 </details>
 
 <details>
@@ -188,6 +192,7 @@ ctx.puppeteer.render('<div style="color: red">Hello World</div>')
 2. 远程模式需要确保远程浏览器已启动并开启了调试模式。
 3. 如果自动查找 Chrome 失败，请手动指定 `executablePath`。
 4. 在远程模式下，`headers` 只影响 Koishi 插件连接远程浏览器时的请求头，不影响浏览器本身的行为。
+
 </details>
 
 ## 开发指南
@@ -200,6 +205,7 @@ ctx.puppeteer.render('<div style="color: red">Hello World</div>')
 ```bash
 yarn clone shangxueink/koishi-plugin-puppeteer-without-canvas
 ```
+
 这会自动调用 `git clone` 到 `./external/puppeteer-without-canvas` 下
 
 ### 修改 Koishi 根工作区的 tsconfig.json
@@ -230,6 +236,7 @@ yarn dev
 ```bash
 yarn build puppeteer-without-canvas
 ```
+
 </details>
 
 ## 许可证
