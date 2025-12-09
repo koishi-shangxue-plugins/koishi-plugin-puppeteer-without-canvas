@@ -95,16 +95,29 @@ export async function injectDefaultFont(page: Page, ctx: Context, config: Puppet
         `
       })
 
-      await page.evaluate(() => {
-        return new Promise<void>((resolve) => {
+      await page.evaluate(`
+        new Promise((resolve) => {
+          let resolved = false;
+          
+          // 设置超时保护，最多等待 3 秒
+          setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              resolve();
+            }
+          }, 3000);
+
           // 检查字体加载
-          const checkFont = () => {
+          (function() {
             if (document.fonts && document.fonts.check) {
               try {
-                const fontLoaded = document.fonts.check('16px "KoishiDefaultFont"')
+                const fontLoaded = document.fonts.check('16px "KoishiDefaultFont"');
                 if (fontLoaded) {
-                  resolve()
-                  return
+                  if (!resolved) {
+                    resolved = true;
+                    resolve();
+                  }
+                  return;
                 }
               } catch (e) {
                 // 如果 check 方法失败，继续使用其他方法
@@ -114,19 +127,31 @@ export async function injectDefaultFont(page: Page, ctx: Context, config: Puppet
             // 备用方法：等待 document.fonts.ready
             if (document.fonts && document.fonts.ready) {
               document.fonts.ready.then(() => {
-                setTimeout(resolve, 100)
+                setTimeout(() => {
+                  if (!resolved) {
+                    resolved = true;
+                    resolve();
+                  }
+                }, 100);
               }).catch(() => {
-                setTimeout(resolve, 500)
-              })
+                setTimeout(() => {
+                  if (!resolved) {
+                    resolved = true;
+                    resolve();
+                  }
+                }, 500);
+              });
             } else {
-              setTimeout(resolve, 500)
+              setTimeout(() => {
+                if (!resolved) {
+                  resolved = true;
+                  resolve();
+                }
+              }, 500);
             }
-          }
-
-          // 立即检查一次
-          checkFont()
+          })();
         })
-      })
+      `)
     }
     // 如果页面已经设置了 font-family，则不注入任何字体样式
   } catch (error) {
