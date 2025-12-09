@@ -5,7 +5,6 @@ import { ElementHandle, Page } from 'puppeteer-core'
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 
-import { } from 'koishi-plugin-fonts'
 
 import { injectDefaultFont } from './index'
 
@@ -187,49 +186,11 @@ export default class extends CanvasService {
     this.page = null
   }
 
-  async createCanvas(
-    width: number,
-    height: number,
-    options?: {
-      families: string[]
-      text?: string
-    },
-  ) {
+  async createCanvas(width: number, height: number) {
     const fontFaceSet = []
     const styleHandles = []
     try {
       const name = `canvas_${++this.counter}`
-      if (options && options.families.length && this.ctx.fonts) {
-        try {
-          const fonts = await this.ctx.fonts.get(options.families)
-          await Promise.all(fonts.map(async (font) => {
-            if (font.format === 'google') {
-              const style = await this.page.addStyleTag({ url: font.path })
-              styleHandles.push(style)
-            } else {
-              await this.page.evaluate((font, fontFaceSet) => {
-                const fontFace = new FontFace(
-                  font.family,
-                  `url(${font.path}) format('${font.format}')`,
-                  font.descriptors,
-                )
-                document.fonts.add(fontFace)
-                fontFaceSet.push(fontFace)
-              }, font, fontFaceSet)
-            }
-          }))
-          if (options?.text) {
-            await this.page.evaluate(async (text, families) => {
-              await document.fonts.load(
-                `1px ${families.join(',')}`,
-                text,
-              )
-            }, options.text, options.families)
-          }
-        } catch (e) {
-          this.ctx.logger('puppeteer').warn('加载字体失败，将使用系统默认字体：', e.message)
-        }
-      }
       await this.page.evaluate([
         `const ${name} = document.createElement('canvas');`,
         `${name}.width = ${width};`,
@@ -248,14 +209,10 @@ export default class extends CanvasService {
     width: number,
     height: number,
     callback: (ctx: CanvasRenderingContext2D) => Awaitable<void>,
-    options?: {
-      families: string[]
-      text?: string
-    },
   ) {
     let canvas: CanvasElement
     try {
-      canvas = await this.createCanvas(width, height, options)
+      canvas = await this.createCanvas(width, height)
       await callback(canvas.getContext('2d'))
       const buffer = await canvas.toBuffer('image/png')
       return h.image(buffer, 'image/png')

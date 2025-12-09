@@ -10,7 +10,6 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 
 import { } from '@cordisjs/plugin-proxy-agent'
-import { } from 'koishi-plugin-fonts'
 import type { } from 'koishi-plugin-glyph'
 import { fontlist } from 'koishi-plugin-glyph'
 
@@ -616,27 +615,6 @@ class Puppeteer extends Service {
           const fontDataUrl = this.getFontDataUrl()
           await injectDefaultFont(page, this.ctx, this.config, fontDataUrl)
         }
-        if (options?.families?.length && this.ctx.fonts) {
-          try {
-            const fonts = await this.ctx.fonts.get(options.families)
-            await Promise.all(fonts.map(async (font) => {
-              if (font.format === 'google') {
-                await page.addStyleTag({ content: `@import url('${font.path}')` })
-              } else {
-                await page.evaluate((font) => {
-                  const fontFace = new FontFace(
-                    font.family,
-                    `url(${font.path}) format('${font.format}')`,
-                    font.descriptors,
-                  )
-                  document.fonts.add(fontFace)
-                }, font)
-              }
-            }))
-          } catch (e) {
-            this.ctx.logger.warn('加载字体失败，将使用系统默认字体：', e.message)
-          }
-        }
       }
     } catch (err) {
       if (page) {
@@ -654,25 +632,13 @@ class Puppeteer extends Service {
     return new SVG(options)
   }
 
-  render = async (content: string, callback?: RenderCallback, families?: string[]) => {
+  render = async (content: string, callback?: RenderCallback) => {
     // 确保浏览器已连接
     await this.ensureConnected()
 
     const url = resolve(__dirname, '../index.html')
-    const page = await this.page({ url, content, families })
+    const page = await this.page({ url, content })
     const renderConfig = this.config.render || {}
-
-    if (families?.length) {
-      try {
-        await page.addStyleTag({ content: `* {font-family: ${families.map((f) => `'${f}'`).join(', ')};}` })
-        await page.evaluate(async () => {
-          await document.fonts.ready
-          await new Promise(resolve => setTimeout(resolve, 100))
-        })
-      } catch (e) {
-        this.ctx.logger.warn('应用字体样式失败：', e.message)
-      }
-    }
 
     callback ||= async (_, next) => page.$('body').then(next)
     const output = await callback(page, async (handle) => {
@@ -694,7 +660,6 @@ namespace Puppeteer {
     url: string
     gotoOptions?: GoToOptions
     content?: string
-    families?: string[]
   }
 
   export const filter = false;
@@ -718,9 +683,7 @@ namespace Puppeteer {
 **服务依赖：**
 
 - **必需服务：** http（自带服务，无需额外安装）
-- **可选服务：**
-  - [fonts](/market?keyword=font+email:shigma10826@gmail.com+email:saarchaffee@qq.com) - 用于字体管理
-  - [glyph](/market?keyword=glyph) - 用于字体注入功能（启用字体注入时需要）
+- **可选服务：** [glyph](/market?keyword=glyph) - 用于字体注入功能（启用字体注入时需要）
 
 ---
 
