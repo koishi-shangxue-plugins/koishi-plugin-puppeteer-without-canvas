@@ -4,14 +4,13 @@ import { SVG, SVGOptions } from './svg'
 import find from 'puppeteer-finder'
 import Canvas from './canvas'
 
+import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { resolve, join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 
-import { } from '@cordisjs/plugin-proxy-agent'
+import type { } from '@cordisjs/plugin-proxy-agent'
 import type { } from 'koishi-plugin-glyph'
-import { fontlist } from 'koishi-plugin-glyph'
 
 export * from './svg'
 
@@ -572,11 +571,6 @@ class Puppeteer extends Service {
       return null
     }
 
-    // 如果选择了 default，返回 null（不注入字体）
-    if (this.config.fontName === 'default') {
-      return null
-    }
-
     // 从 glyph 服务获取字体 Data URL
     if (this.ctx.glyph) {
       try {
@@ -838,7 +832,7 @@ namespace Puppeteer {
     Schema.union([
       Schema.object({
         enableFont: Schema.const(true).required(),
-        fontName: Schema.union(fontlist).description('选择要注入的字体。<br>选择 `default` 表示不使用自定义字体。<br>需要先安装并配置 `glyph` 插件。').experimental(),
+        fontName: Schema.dynamic('glyph.fonts').description('选择要注入的字体。<br>需要先安装并配置 `glyph` 插件。<br>**注意**: 动态配置项在开发模式下不显示选项，请在生产模式下查看。').experimental(),
         fontInjectMode: Schema.union([
           Schema.const('smart').description('1.判断注入'),
           Schema.const('force').description('2.强制注入'),
