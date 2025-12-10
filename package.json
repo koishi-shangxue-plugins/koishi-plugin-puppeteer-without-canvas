@@ -1,7 +1,7 @@
 {
   "name": "@shangxueink/koishi-plugin-puppeteer-without-canvas",
   "description": "Browser API service for Koishi",
-  "version": "2.2.0",
+  "version": "2.3.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -60,7 +60,7 @@
   "devDependencies": {
     "@cordisjs/plugin-proxy-agent": "^0.3.3",
     "koishi": "^4.18.7",
-    "koishi-plugin-glyph": "^1.1.0"
+    "koishi-plugin-glyph": "^2.0.0"
   },
   "dependencies": {
     "@koishijs/canvas": "^0.2.0",
