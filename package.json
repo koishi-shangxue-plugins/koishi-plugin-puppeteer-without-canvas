@@ -1,7 +1,7 @@
 {
   "name": "@shangxueink/koishi-plugin-puppeteer-without-canvas",
   "description": "Browser API service for Koishi",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [
@@ -16,12 +16,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shangxueink/koishi-plugin-puppeteer-without-canvas"
+    "url": "git+https://github.com/koishi-shangxue-plugins/koishi-plugin-puppeteer-without-canvas.git"
   },
   "bugs": {
-    "url": "https://github.com/shangxueink/koishi-plugin-puppeteer-without-canvas/issues"
+    "url": "https://github.com/koishi-shangxue-plugins/koishi-plugin-puppeteer-without-canvas/issues"
   },
-  "homepage": "https://github.com/shangxueink/koishi-plugin-puppeteer-without-canvas",
+  "homepage": "https://github.com/koishi-shangxue-plugins/koishi-plugin-puppeteer-without-canvas",
   "koishi": {
     "description": {
       "zh": "浏览器服务。支持远程浏览器、可选的 Canvas 服务、指令重启、默认渲染类型、fonts 字体支持...",

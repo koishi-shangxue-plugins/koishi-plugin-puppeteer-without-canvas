@@ -86,7 +86,7 @@ export async function injectDefaultFont(page: Page, ctx: Context, config: Puppet
           *, *::before, *::after {
             font-family: "KoishiDefaultFont" !important;
           }
-          
+
           html, body, div, span, p, h1, h2, h3, h4, h5, h6,
           input, textarea, button, select, option, canvas {
             font-family: "KoishiDefaultFont" !important;
@@ -97,7 +97,7 @@ export async function injectDefaultFont(page: Page, ctx: Context, config: Puppet
       await page.evaluate(`
         new Promise((resolve) => {
           let resolved = false;
-          
+
           // 设置超时保护，最多等待 3 秒
           setTimeout(() => {
             if (!resolved) {
@@ -343,6 +343,16 @@ class Puppeteer extends Service {
       } else {
         // 查找可执行文件路径
         this.executable = executablePath || find()
+
+        // 如果找不到，尝试 Termux 特殊路径
+        if (!this.executable) {
+          const termuxChromiumPath = '/data/data/com.termux/files/usr/bin/chromium-browser'
+          if (existsSync(termuxChromiumPath)) {
+            this.executable = termuxChromiumPath
+            this.ctx.logger.info('在 Termux 环境中找到浏览器: %c', termuxChromiumPath)
+          }
+        }
+
         if (!this.executable) {
           throw new Error('未找到 Chrome 可执行文件，请手动指定 executablePath 参数')
         }
