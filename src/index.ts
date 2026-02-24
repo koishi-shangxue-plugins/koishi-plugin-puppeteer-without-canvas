@@ -169,6 +169,8 @@ class Puppeteer extends Service {
   executable: string
   private browserWSEndpoint: string
   private activePageCount: number = 0
+  private isRestarting: boolean = false // 是否正在重启
+  private disposeKeepAlive: (() => void) | null = null // 保活定时器销毁函数
 
   constructor(ctx: Context, public config: Puppeteer.Config) {
     super(ctx, 'puppeteer')
@@ -284,6 +286,8 @@ class Puppeteer extends Service {
     // 如果启用了立即关闭模式，则不在启动时初始化浏览器
     if (!this.config.immediateClose) {
       await this.startBrowser()
+      // 启动保活机制
+      this.startKeepAlive()
     }
   }
 
@@ -327,7 +331,6 @@ class Puppeteer extends Service {
           } else if (this.browser.wsEndpoint) {
             // 如果使用 HTTP URL，从浏览器实例获取 WebSocket 端点
             this.browserWSEndpoint = this.browser.wsEndpoint()
-            this.ctx.logger.debug('从 HTTP URL 获取 WebSocket 端点: %c', this.browserWSEndpoint)
           }
         } catch (e) {
           // 处理连接错误
@@ -405,6 +408,8 @@ class Puppeteer extends Service {
   }
 
   async stop() {
+    // 停止保活定时器
+    this.stopKeepAlive()
     await this.stopBrowser()
   }
 
@@ -425,6 +430,91 @@ class Puppeteer extends Service {
     }
   }
 
+  // 启动保活机制
+  private startKeepAlive() {
+    // 如果未启用保活或启用了立即关闭模式，则不启动保活
+    if (!this.config.enableKeepAlive || this.config.immediateClose) {
+      return
+    }
+
+    // 清除已有的定时器
+    this.stopKeepAlive()
+
+    const interval = this.config.keepAliveInterval || 30000 // 默认30秒检查一次
+
+    this.disposeKeepAlive = this.ctx.setInterval(async () => {
+      await this.checkBrowserHealth()
+    }, interval)
+  }
+
+  // 停止保活机制
+  private stopKeepAlive() {
+    if (this.disposeKeepAlive) {
+      this.disposeKeepAlive()
+      this.disposeKeepAlive = null
+    }
+  }
+
+  // 检查浏览器健康状态
+  private async checkBrowserHealth() {
+    // 如果正在重启，跳过本次检查
+    if (this.isRestarting) {
+      return
+    }
+
+    // 如果浏览器未初始化，跳过检查
+    if (!this.browser) {
+      return
+    }
+
+    try {
+      // 检查浏览器连接状态
+      if (!this.browser.connected) {
+        this.ctx.logger.warn('检测到浏览器连接已断开，尝试重新连接...')
+        await this.restartBrowserSafely()
+        return
+      }
+
+      // 尝试获取浏览器版本来验证浏览器是否真正存活
+      await this.browser.version()
+
+      // 如果能成功获取版本，说明浏览器正常
+    } catch (error) {
+      // 如果获取版本失败，说明浏览器进程可能已被杀死
+      this.ctx.logger.warn('浏览器健康检查失败: %s，尝试重启...', error.message)
+      await this.restartBrowserSafely()
+    }
+  }
+
+  // 安全地重启浏览器
+  private async restartBrowserSafely() {
+    // 防止并发重启
+    if (this.isRestarting) {
+      return
+    }
+
+    this.isRestarting = true
+
+    try {
+      this.ctx.logger.info('开始重启浏览器...')
+
+      // 停止当前浏览器
+      await this.stopBrowser()
+
+      // 等待一小段时间确保资源释放
+      await this.ctx.sleep(1000)
+
+      // 重新启动浏览器
+      await this.startBrowser()
+
+      this.ctx.logger.info('浏览器重启成功')
+    } catch (error) {
+      this.ctx.logger.error('浏览器重启失败: %s', error.message)
+    } finally {
+      this.isRestarting = false
+    }
+  }
+
   // 检查并关闭浏览器
   private async checkAndCloseBrowser() {
     if (!this.config.immediateClose) return
@@ -438,7 +528,6 @@ class Puppeteer extends Service {
         const nonBlankPages = pages.filter(page => page.url() !== 'about:blank')
 
         if (nonBlankPages.length === 0) {
-          this.ctx.logger.debug('所有页面已关闭，正在关闭浏览器连接')
           await this.stopBrowser()
         }
       } catch (error) {
@@ -479,7 +568,7 @@ class Puppeteer extends Service {
 
         // 如果设置了重连间隔，则等待指定时间
         if (this.config.reconnectInterval > 0) {
-          await new Promise(resolve => setTimeout(resolve, this.config.reconnectInterval))
+          await this.ctx.sleep(this.config.reconnectInterval)
         }
 
         // 准备连接选项
@@ -488,17 +577,14 @@ class Puppeteer extends Service {
         // 优先使用保存的 WebSocket 端点，如果没有则使用配置的端点
         if (this.browserWSEndpoint) {
           connectOptions.browserWSEndpoint = this.browserWSEndpoint
-          this.ctx.logger.debug('使用保存的 WebSocket 端点重连: %c', this.browserWSEndpoint)
         } else if (this.config.endpoint) {
           // 检查端点类型
           try {
             const endpointURL = new URL(this.config.endpoint)
             if (['ws:', 'wss:'].includes(endpointURL.protocol)) {
               connectOptions.browserWSEndpoint = this.config.endpoint
-              this.ctx.logger.debug('使用配置的 WebSocket 端点重连: %c', this.config.endpoint)
             } else if (['http:', 'https:'].includes(endpointURL.protocol)) {
               connectOptions.browserURL = this.config.endpoint
-              this.ctx.logger.debug('使用配置的 HTTP 端点重连: %c', this.config.endpoint)
             }
           } catch (e) {
             this.ctx.logger.warn('解析端点 URL 失败: %c', e.message)
@@ -515,7 +601,6 @@ class Puppeteer extends Service {
           // 保存新的 WebSocket 端点
           if (this.browser.wsEndpoint) {
             this.browserWSEndpoint = this.browser.wsEndpoint()
-            this.ctx.logger.debug('保存新的 WebSocket 端点: %c', this.browserWSEndpoint)
           }
 
           return
@@ -553,7 +638,6 @@ class Puppeteer extends Service {
               // 保存新的 WebSocket 端点
               if (this.browser.wsEndpoint) {
                 this.browserWSEndpoint = this.browser.wsEndpoint()
-                this.ctx.logger.debug('保存新的 WebSocket 端点: %c', this.browserWSEndpoint)
               }
 
               return
@@ -569,7 +653,7 @@ class Puppeteer extends Service {
         } else {
           this.ctx.logger.warn(`浏览器重新连接失败，将重试 (${retryCount}/${maxRetries}):`, e.message)
           // 增加重试间隔
-          await new Promise(resolve => setTimeout(resolve, this.config.reconnectInterval * retryCount))
+          await this.ctx.sleep(this.config.reconnectInterval * retryCount)
         }
       }
     }
@@ -736,6 +820,8 @@ namespace Puppeteer {
     reconnectInterval?: number
     maxReconnectRetries?: number
     immediateClose?: boolean
+    enableKeepAlive?: boolean
+    keepAliveInterval?: number
     enableFont?: boolean
     fontName?: string
     fontInjectMode?: 'force' | 'smart'
@@ -798,7 +884,12 @@ namespace Puppeteer {
       enableReconnect: Schema.boolean().description('是否启用浏览器自动重连功能。当浏览器连接断开时，会尝试重新连接。').default(true),
       reconnectInterval: Schema.number().description('浏览器重连尝试的间隔时间（毫秒）。').default(1000),
       maxReconnectRetries: Schema.number().description('浏览器重连最大尝试次数。').default(3),
-    }).description('功能设置'),
+    }).description('重连功能设置'),
+
+    Schema.object({
+      enableKeepAlive: Schema.boolean().description('是否启用浏览器保活机制。定期检查浏览器健康状态，自动重启被杀死的浏览器进程。<br>**注意**: 仅在非立即关闭模式下有效（即 `immediateClose` 配置项关闭时）。').default(false),
+      keepAliveInterval: Schema.number().description('浏览器健康检查的间隔时间（毫秒）。').default(30000).min(5000),
+    }).description('保活功能设置'),
 
     Schema.object({
       render: Schema.intersect([
