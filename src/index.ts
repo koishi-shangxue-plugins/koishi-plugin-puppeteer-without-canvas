@@ -684,13 +684,18 @@ class Puppeteer extends Service {
   }
 
   page = async (options?: Puppeteer.PageOptions) => {
-    let page
+    let page: Page | undefined
     try {
       // 确保浏览器已连接
       await this.ensureConnected()
 
       // 创建新页面
       page = await this.browser.newPage()
+
+      // 设置默认超时时间
+      if (this.config.defaultTimeout !== undefined) {
+        page.setDefaultTimeout(this.config.defaultTimeout)
+      }
 
       // 注入默认字体
       const fontDataUrl = this.getFontDataUrl()
@@ -827,6 +832,7 @@ namespace Puppeteer {
     fontInjectMode?: 'force' | 'smart'
     enableTempUserDataDir?: boolean
     TempUserDataDir?: string
+    defaultTimeout?: number
     render?: {
       type?: ImageType
       quality?: number
@@ -908,6 +914,7 @@ namespace Puppeteer {
     }).description('渲染设置'),
 
     Schema.object({
+      defaultTimeout: Schema.number().description('页面渲染的默认超时时间（毫秒）。<br>设置为 0 表示禁用超时。').default(30000).min(0),
       defaultViewport: Schema.object({
         width: Schema.natural().description('默认的视图宽度。').default(1280),
         height: Schema.natural().description('默认的视图高度。').default(768),
