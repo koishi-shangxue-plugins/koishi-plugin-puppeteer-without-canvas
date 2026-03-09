@@ -344,23 +344,32 @@ class Puppeteer extends Service {
           }
         }
       } else {
-        // 查找可执行文件路径
-        this.executable = executablePath || find()
-
-        // 如果找不到，尝试 Termux 特殊路径
-        if (!this.executable) {
-          const termuxChromiumPath = '/data/data/com.termux/files/usr/bin/chromium-browser'
-          if (existsSync(termuxChromiumPath)) {
-            this.executable = termuxChromiumPath
-            this.ctx.logger.info('在 Termux 环境中找到浏览器: %c', termuxChromiumPath)
+        // 当配置路径存在且可访问时直接使用，否则（未配置或路径不可用）从环境自动查找
+        if (executablePath && existsSync(executablePath)) {
+          this.executable = executablePath
+          this.ctx.logger.info('使用配置指定的浏览器路径: %c', this.executable)
+        } else {
+          if (executablePath) {
+            // 用户填写了路径但文件不存在，给出警告后回退到自动查找
+            this.ctx.logger.warn('配置的可执行文件路径不可用: %c，将从环境自动查找', executablePath)
           }
-        }
 
-        if (!this.executable) {
-          throw new Error('未找到 Chrome 可执行文件，请手动指定 executablePath 参数')
-        }
+          // 调用 puppeteer-finder 从环境自动发现
+          this.executable = find()
 
-        if (!executablePath) {
+          // 找不到时尝试 Termux 特殊路径
+          if (!this.executable) {
+            const termuxChromiumPath = '/data/data/com.termux/files/usr/bin/chromium-browser'
+            if (existsSync(termuxChromiumPath)) {
+              this.executable = termuxChromiumPath
+              this.ctx.logger.info('在 Termux 环境中找到浏览器: %c', termuxChromiumPath)
+            }
+          }
+
+          if (!this.executable) {
+            throw new Error('未找到 Chrome 可执行文件，请手动指定 executablePath 参数')
+          }
+
           this.ctx.logger.info('找到 Chrome 可执行文件: %c', this.executable)
         }
 
@@ -862,8 +871,8 @@ namespace Puppeteer {
         remote: Schema.const(false).default(false),
         executablePath: Schema.string().description(
           '`Chrome/Chromium 可执行文件`的路径。一般无需指定。<br>' +
-          '如果不指定，将自动从系统中查找。<br>' +
-          '如果自动查找失败，请手动指定此路径。'
+          '**缺省或路径不可用时**，将自动从系统环境中查找。<br>' +
+          '仅当自动查找失败时，才需要手动指定此路径。'
         ),
         headless: Schema.boolean().description('是否开启[无头模式](https://developer.chrome.com/blog/headless-chrome/)。无头模式下浏览器不会显示界面。').default(true),
         immediateClose: Schema.boolean().description('是否在渲染完成后 立即关闭浏览器连接。<br>启用后 会增加每次渲染的启动时间。适用于低频率渲染场景。').default(false).experimental(),
