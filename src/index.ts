@@ -399,15 +399,37 @@ class Puppeteer extends Service {
             this.ctx.logger.info('用户数据目录: %c', userDataDir)
           }
 
-          this.browser = await puppeteer.launch(launchOptions)
-          this.browserWSEndpoint = this.browser.wsEndpoint()
-          this.ctx.logger.info('本地浏览器启动成功。')
-        } catch (e) {
-          if (e.message?.includes('Failed to launch')) {
-            throw new Error(`启动浏览器失败，请检查 Chrome 是否已安装或路径是否正确: ${e.message}`)
-          } else {
-            throw new Error(`启动浏览器失败: ${e.message || e}`)
+          // 最多重试 3 次，应对端口短暂占用或进程未完全释放等偶发问题
+          const maxLaunchRetries = 3
+          let launched = false
+          for (let attempt = 1; attempt <= maxLaunchRetries; attempt++) {
+            try {
+              this.browser = await puppeteer.launch(launchOptions)
+              this.browserWSEndpoint = this.browser.wsEndpoint()
+              this.ctx.logger.info('本地浏览器启动成功。')
+              launched = true
+              break
+            } catch (e) {
+              if (attempt < maxLaunchRetries) {
+                // 遇到端口占用或启动失败时，稍等片刻后重试（Chrome 会自动换端口）
+                this.ctx.logger.warn(`浏览器启动失败，1 秒后重试 (${attempt}/${maxLaunchRetries}): ${e.message}`)
+                await this.ctx.sleep(1000)
+              } else {
+                // 已达最大重试次数，抛出详细错误
+                if (e.message?.includes('Failed to launch') || e.message?.includes('EADDRINUSE')) {
+                  throw new Error(`启动浏览器失败（已重试 ${maxLaunchRetries} 次），请检查 Chrome 是否已安装或端口是否被其他进程持续占用: ${e.message}`)
+                } else {
+                  throw new Error(`启动浏览器失败: ${e.message || e}`)
+                }
+              }
+            }
           }
+          if (!launched) {
+            throw new Error('浏览器启动失败：未知原因导致重试循环退出')
+          }
+        } catch (e) {
+          // 重新抛出，由外层统一处理
+          throw e
         }
       }
     } catch (error) {
@@ -561,10 +583,18 @@ class Puppeteer extends Service {
       throw new Error('浏览器连接已断开，且未启用自动重连')
     }
 
-    // 检查是否有可用的重连端点
+    // 本地模式：浏览器进程重启后端点（含随机端口）会失效，不应尝试 connect() 旧端点
+    // 直接重新启动一个新的浏览器进程，避免因旧端口被其他进程占用导致连接失败
+    if (!this.config.remote) {
+      this.ctx.logger.warn('本地浏览器连接已断开，将重新启动浏览器...')
+      await this.restartBrowserSafely()
+      return
+    }
+
+    // 远程模式：检查是否有可用的重连端点
     const hasReconnectEndpoint = this.browserWSEndpoint || this.config.endpoint
     if (!hasReconnectEndpoint) {
-      throw new Error('浏览器连接已断开，且没有可用的重连端点')
+      throw new Error('远程浏览器连接已断开，且没有可用的重连端点')
     }
 
     // 尝试重连，使用配置的最大重试次数
