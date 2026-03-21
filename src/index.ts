@@ -173,6 +173,10 @@ class Puppeteer extends Service {
   private isRestarting: boolean = false // 是否正在重启
   private disposeKeepAlive: (() => void) | null = null // 保活定时器销毁函数
 
+  private originalBrowserMethods = new WeakMap<Browser, {
+    newPage: Browser['newPage']
+    createBrowserContext: Browser['createBrowserContext']
+  }>()
   private patchedBrowsers = new WeakSet<Browser>()
   private trackedPages = new WeakSet<Page>()
   private trackedContexts = new WeakSet<BrowserContext>()
@@ -218,15 +222,36 @@ class Puppeteer extends Service {
 
     this.patchedBrowsers.add(browser)
 
-    const originalNewPage = browser.newPage.bind(browser)
+    this.originalBrowserMethods.set(browser, {
+      newPage: browser.newPage.bind(browser),
+      createBrowserContext: browser.createBrowserContext.bind(browser),
+    })
+
     browser.newPage = async (...args: Parameters<Browser['newPage']>) => {
-      const page = await originalNewPage(...args)
+      await this.ensureConnected()
+      const currentBrowser = this.browser
+      if (!currentBrowser) {
+        throw new Error('浏览器尚未启动')
+      }
+      const originalMethods = this.originalBrowserMethods.get(currentBrowser)
+      if (!originalMethods) {
+        throw new Error('浏览器实例尚未完成方法补丁注册')
+      }
+      const page = await originalMethods.newPage(...args)
       return this.trackPage(page)
     }
 
-    const originalCreateBrowserContext = browser.createBrowserContext.bind(browser)
     browser.createBrowserContext = async (...args: Parameters<Browser['createBrowserContext']>) => {
-      const context = await originalCreateBrowserContext(...args)
+      await this.ensureConnected()
+      const currentBrowser = this.browser
+      if (!currentBrowser) {
+        throw new Error('浏览器尚未启动')
+      }
+      const originalMethods = this.originalBrowserMethods.get(currentBrowser)
+      if (!originalMethods) {
+        throw new Error('浏览器实例尚未完成方法补丁注册')
+      }
+      const context = await originalMethods.createBrowserContext(...args)
       return this.trackBrowserContext(context)
     }
   }
