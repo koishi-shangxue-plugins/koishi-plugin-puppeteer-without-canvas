@@ -1,4 +1,4 @@
-import puppeteer, { Browser, ConnectOptions, ElementHandle, GoToOptions, Page } from 'puppeteer-core'
+import puppeteer, { Browser, BrowserContext, ConnectOptions, ElementHandle, GoToOptions, Page } from 'puppeteer-core'
 import { Context, h, hyphenate, Schema, Service } from 'koishi'
 import { SVG, SVGOptions } from './svg'
 import find from 'puppeteer-finder'
@@ -169,9 +169,13 @@ class Puppeteer extends Service {
   executable: string
   private browserWSEndpoint: string
   private activePageCount: number = 0
+  private activeContextCount: number = 0
   private isRestarting: boolean = false // 是否正在重启
   private disposeKeepAlive: (() => void) | null = null // 保活定时器销毁函数
 
+  private patchedBrowsers = new WeakSet<Browser>()
+  private trackedPages = new WeakSet<Page>()
+  private trackedContexts = new WeakSet<BrowserContext>()
   constructor(ctx: Context, public config: Puppeteer.Config) {
     super(ctx, 'puppeteer')
     if (this.config.enableCanvas !== false) {
@@ -205,6 +209,106 @@ class Puppeteer extends Service {
     } else if (this.config.immediateClose && this.config.enableRestartCommand !== false) {
       ctx.logger.warn('immediateClose 模式下 puppeteer.restart 指令已被禁用')
     }
+  }
+
+  private patchBrowser(browser: Browser) {
+    if (this.patchedBrowsers.has(browser)) {
+      return
+    }
+
+    this.patchedBrowsers.add(browser)
+
+    const originalNewPage = browser.newPage.bind(browser)
+    browser.newPage = async (...args: Parameters<Browser['newPage']>) => {
+      const page = await originalNewPage(...args)
+      return this.trackPage(page)
+    }
+
+    const originalCreateBrowserContext = browser.createBrowserContext.bind(browser)
+    browser.createBrowserContext = async (...args: Parameters<Browser['createBrowserContext']>) => {
+      const context = await originalCreateBrowserContext(...args)
+      return this.trackBrowserContext(context)
+    }
+  }
+
+  private trackBrowserContext(context: BrowserContext) {
+    if (this.trackedContexts.has(context)) {
+      return context
+    }
+
+    this.trackedContexts.add(context)
+
+    if (this.config.immediateClose) {
+      this.activeContextCount++
+    }
+
+    const originalNewPage = context.newPage.bind(context)
+    context.newPage = async (...args: Parameters<BrowserContext['newPage']>) => {
+      const page = await originalNewPage(...args)
+      return this.trackPage(page)
+    }
+
+    const originalClose = context.close.bind(context)
+    let released = false
+
+    const release = async () => {
+      if (released || !this.config.immediateClose) {
+        return
+      }
+
+      released = true
+      this.activeContextCount = Math.max(0, this.activeContextCount - 1)
+      await this.checkAndCloseBrowser()
+    }
+
+    context.close = async () => {
+      try {
+        await originalClose()
+      } finally {
+        await release()
+      }
+    }
+
+    return context
+  }
+
+  private trackPage(page: Page) {
+    if (this.trackedPages.has(page)) {
+      return page
+    }
+
+    this.trackedPages.add(page)
+
+    if (this.config.immediateClose) {
+      this.activePageCount++
+    }
+
+    const originalClose = page.close.bind(page)
+    let released = false
+
+    const release = async () => {
+      if (released || !this.config.immediateClose) {
+        return
+      }
+
+      released = true
+      this.activePageCount = Math.max(0, this.activePageCount - 1)
+      await this.checkAndCloseBrowser()
+    }
+
+    page.once('close', () => {
+      void release()
+    })
+
+    page.close = async (...args: Parameters<Page['close']>) => {
+      try {
+        await originalClose(...args)
+      } finally {
+        await release()
+      }
+    }
+
+    return page
   }
 
   private getFontCacheDir(customDir?: string): string {
@@ -323,6 +427,7 @@ class Puppeteer extends Service {
         try {
           this.ctx.logger.info('正在连接远程浏览器: %c', endpoint)
           this.browser = await puppeteer.connect(connectOptions)
+          this.patchBrowser(this.browser)
           this.ctx.logger.info('远程浏览器连接成功。')
 
           // 保存 WebSocket 端点，无论是直接提供的还是从 HTTP URL 获取的
@@ -405,6 +510,7 @@ class Puppeteer extends Service {
           for (let attempt = 1; attempt <= maxLaunchRetries; attempt++) {
             try {
               this.browser = await puppeteer.launch(launchOptions)
+              this.patchBrowser(this.browser)
               this.browserWSEndpoint = this.browser.wsEndpoint()
               this.ctx.logger.info('本地浏览器启动成功。')
               launched = true
@@ -455,6 +561,7 @@ class Puppeteer extends Service {
         this.browser = null
         this.browserWSEndpoint = null
         this.activePageCount = 0
+        this.activeContextCount = 0
       }
     } catch (error) {
       this.ctx.logger.warn('停止浏览器时出现错误:', error.message)
@@ -550,7 +657,8 @@ class Puppeteer extends Service {
   private async checkAndCloseBrowser() {
     if (!this.config.immediateClose) return
 
-    if (this.activePageCount <= 0 && this.browser) {
+    // 只有页面和上下文都已释放后，才允许关闭整个浏览器。
+    if (this.activePageCount <= 0 && this.activeContextCount <= 0 && this.browser) {
       try {
         // 获取所有页面
         const pages = await this.browser.pages()
@@ -632,6 +740,7 @@ class Puppeteer extends Service {
 
         // 尝试重新连接
         this.browser = await puppeteer.connect(connectOptions)
+        this.patchBrowser(this.browser)
 
         // 检查连接是否成功
         if (this.browser.connected) {
@@ -669,6 +778,7 @@ class Puppeteer extends Service {
             }
 
             this.browser = await puppeteer.connect(originalOptions)
+            this.patchBrowser(this.browser)
 
             // 检查连接是否成功
             if (this.browser.connected) {
@@ -729,7 +839,9 @@ class Puppeteer extends Service {
       await this.ensureConnected()
 
       // 创建新页面
+      // 创建新页面，并统一纳入生命周期跟踪。
       page = await this.browser.newPage()
+      page = this.trackPage(page)
 
       // 设置默认超时时间
       if (this.config.defaultTimeout !== undefined) {
@@ -747,18 +859,6 @@ class Puppeteer extends Service {
         const fontDataUrl = this.getFontDataUrl()
         await injectDefaultFont(page, this.ctx, this.config, fontDataUrl)
         return result
-      }
-
-      // 如果启用了立即关闭模式
-      // 包装 close 方法
-      if (this.config.immediateClose) {
-        this.activePageCount++
-        const originalClose = page.close.bind(page)
-        page.close = async () => {
-          await originalClose()
-          this.activePageCount--
-          await this.checkAndCloseBrowser()
-        }
       }
 
       if (options) {
@@ -806,7 +906,7 @@ class Puppeteer extends Service {
       return h.image(buffer, `image/${imageType}`).toString()
     })
 
-    page.close()
+    await page.close()
     return output
   }
 }
